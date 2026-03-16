@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NVV Spielfest Planer</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Vue.js über CDN für einfache Reaktivität -->
+    <script src="https://unpkg.com/vue@3"></script>
+</head>
+<body>
+<div id="app">
+    <header class="app-header">
+        <div class="header-left">
+            <img src="img/logo.png" alt="Spielfest Logo" class="logo">
+            <h1>Spielfest master</h1>
+        </div>
+        <div class="header-right">
+            <div class="header-timer" @click="timerVisible = !timerVisible" title="Timer öffnen">
+                <svg viewBox="0 0 100 100">
+                    <circle class="bg" cx="50" cy="50" r="45"/>
+                    <circle class="progress" cx="50" cy="50" r="45" :style="{ strokeDashoffset: 2*Math.PI*45*(1 - pct) }"/>
+                </svg>
+                <span class="header-timer-label">{{ formattedTime }}</span>
+            </div>
+            <label class="import-btn">
+                <input type="file" accept=".json" @change="importSchedule" style="display:none">
+                Spielfest importieren
+            </label>
+            <button @click="newSpielfest" class="export-btn small">Neues Spielfest</button>
+        </div>
+    </header>
+
+    <section>
+        <h2>Felder konfigurieren</h2>
+        <label>
+            Gesamtanzahl Felder:
+            <input type="number" v-model.number="fieldCount" min="1">
+        </label>
+        <label>
+            Championsliga-Felder:
+            <input type="number" v-model.number="clFieldCount" :max="fieldCount" min="0">
+        </label>
+        <label>
+            <input type="checkbox" v-model="returnLegs">
+            Rückrunde (Hin- und Rückspiel)
+        </label>
+        <p v-if="clFieldCount>fieldCount" class="warning">
+            ⚠️ Es können nicht mehr CL-Felder als Gesamtfelder vorhanden sein.
+        </p>
+    </section>
+
+    <section>
+        <h2>Teams anlegen</h2>
+        <div class="team-form">
+            <input type="text" v-model="newTeam.name" placeholder="Teamname">
+            <select v-model="newTeam.league">
+                <option value="CL">Championsliga</option>
+                <option value="BL">Bundesliga</option>
+            </select>
+            <button @click="addTeam">Hinzufügen</button>
+        </div>
+        <ul class="team-list">
+            <li v-for="(team,index) in teams" :key="index">
+                {{ team.name }} ({{ team.league }})
+                <button @click="removeTeam(index)">✖</button>
+            </li>
+        </ul>
+    </section>
+
+    <section>
+        <button @click="generateSchedule" class="generate-btn">Spielplan erstellen</button>
+    </section>
+
+    <section class="printable" v-if="schedule.CL.length || schedule.BL.length">
+        <h2>Spielplan</h2>
+        <button @click="downloadSchedule" class="export-btn">Spielplan herunterladen (JSON)</button>
+        <button @click="downloadCSV" class="export-btn">Spielplan + Tabellen (CSV)</button>
+        <button @click="newSpielfest" class="export-btn">Neues Spielfest</button>
+        <!-- timer popup panel -->
+        <div class="timer-panel" :class="timerSize" v-if="timerVisible">
+            <div class="timer">
+                <div :class="['timer-circle', timerSize]">
+                    <svg viewBox="0 0 100 100">
+                        <circle class="bg" cx="50" cy="50" r="45"/>
+                        <circle class="progress" cx="50" cy="50" r="45"
+                                :style="{ strokeDashoffset: 2*Math.PI*45*(1 - pct) }"/>
+                    </svg>
+                    <div class="time-label">{{ formattedTime }}</div>
+                </div>
+                <div class="timer-controls">
+                    <label>Minuten:
+                        <select v-model.number="timerLength">
+                            <option v-for="n in 10" :key="n" :value="n">{{ n }}</option>
+                        </select>
+                    </label>
+                    <label>Größe:
+                        <select v-model="timerSize">
+                            <option value="small">Klein</option>
+                            <option value="large">Groß</option>
+                        </select>
+                    </label>
+                    <button @click="startTimer">Start</button>
+                    <button @click="stopTimer">Stopp</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal" v-if="showTimerAlert">
+            <div class="modal-content">
+                <p><strong>Zeit abgelaufen!</strong></p>
+                <button @click="showTimerAlert=false">OK</button>
+            </div>
+        </div>
+        <!-- round-switcher -->
+        <div class="round-nav" v-if="clFieldCount && maxRoundCL > 0">
+            <h3>Championsliga – Runde {{ roundLabelCL }}</h3>
+            <button @click="prevRound('CL')" :disabled="currentRoundCL<=1">←</button>
+            <button @click="nextRound('CL')" :disabled="currentRoundCL>=maxRoundCL">→</button>
+            <table class="round-table">
+                <tr><th>Feld</th><th>Heim</th><th>Gast</th><th>Status</th></tr>
+                <tr v-for="item in matchGridCL" :key="item.field">
+                    <td>{{ item.field }}</td>
+                    <td>{{ item.home || '-' }}</td>
+                    <td>{{ item.away || '-' }}</td>
+                    <td><span :class="['status', item.status.toLowerCase()]">{{ item.status }}</span></td>
+                </tr>
+            </table>
+            <div class="waiting" v-if="waitingMatchesCL.length">
+                <h4>Warteliste</h4>
+                <table class="round-table small">
+                    <tr><th>#</th><th>Team 1</th><th>Team 2</th></tr>
+                    <tr v-for="(m, idx) in waitingMatchesCL" :key="idx">
+                        <td>{{ idx + 1 }}</td>
+                        <td>{{ m.home }}</td>
+                        <td>{{ m.away }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <div class="round-nav" v-if="fieldCount>clFieldCount && maxRoundBL > 0">
+            <h3>Bundesliga – Runde {{ roundLabelBL }}</h3>
+            <button @click="prevRound('BL')" :disabled="currentRoundBL<=1">←</button>
+            <button @click="nextRound('BL')" :disabled="currentRoundBL>=maxRoundBL">→</button>
+            <table class="round-table">
+                <tr><th>Feld</th><th>Heim</th><th>Gast</th><th>Status</th></tr>
+                <tr v-for="item in matchGridBL" :key="item.field">
+                    <td>{{ item.field }}</td>
+                    <td>{{ item.home || '-' }}</td>
+                    <td>{{ item.away || '-' }}</td>
+                    <td><span :class="['status', item.status.toLowerCase()]">{{ item.status }}</span></td>
+                </tr>
+            </table>
+            <div class="waiting" v-if="waitingMatchesBL.length">
+                <h4>Warteliste</h4>
+                <table class="round-table small">
+                    <tr><th>#</th><th>Team 1</th><th>Team 2</th></tr>
+                    <tr v-for="(m, idx) in waitingMatchesBL" :key="idx">
+                        <td>{{ idx + 1 }}</td>
+                        <td>{{ m.home }}</td>
+                        <td>{{ m.away }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <div v-if="schedule.CL.length">
+            <h3>Championsliga</h3>
+            <table class="schedule-table">
+                <tr>
+                    <th>Runde</th>
+                    <th>Heim</th>
+                    <th>Gast</th>
+                    <th>Feld</th>
+                </tr>
+                <tr v-for="(game, idx) in schedule.CL" :key="'cl'+idx">
+                    <td>{{ game.round }}</td>
+                    <td>
+                        <span v-if="game.field !== null">
+                            {{ game.home ? (game.away ? game.home : (game.home + ' (Pause)')) : 'Pause' }}
+                        </span>
+                        <span v-else>
+                            <span v-if="game.home && game.away">
+                                {{ game.home + ' vs ' + game.away }} (Warten)
+                            </span>
+                            <span v-else>
+                                {{ (game.home || game.away) + ' (Pause)' }}
+                            </span>
+                        </span>
+                    </td>
+                    <td>
+                        <span v-if="game.field !== null">
+                            {{ game.away ? (game.home ? game.away : (game.away + ' (Pause)')) : 'Pause' }}
+                        </span>
+                    </td>
+                    <td>{{ game.field !== null ? game.field : (game.home && game.away ? 'Warten' : 'Pause') }}</td>
+                </tr>
+            </table>
+        </div>
+        <div v-if="schedule.BL.length">
+            <h3>Bundesliga</h3>
+            <table class="schedule-table">
+                <tr>
+                    <th>Runde</th>
+                    <th>Heim</th>
+                    <th>Gast</th>
+                    <th>Feld</th>
+                </tr>
+                <tr v-for="(game, idx) in schedule.BL" :key="'bl'+idx">
+                    <td>{{ game.round }}</td>
+                    <td>
+                        <span v-if="game.field !== null">
+                            {{ game.home ? (game.away ? game.home : (game.home + ' (Pause)')) : 'Pause' }}
+                        </span>
+                        <span v-else>
+                            <span v-if="game.home && game.away">
+                                {{ game.home + ' vs ' + game.away }} (Warten)
+                            </span>
+                            <span v-else>
+                                {{ (game.home || game.away) + ' (Pause)' }}
+                            </span>
+                        </span>
+                    </td>
+                    <td>
+                        <span v-if="game.field !== null">
+                            {{ game.away ? (game.home ? game.away : (game.away + ' (Pause)')) : 'Pause' }}
+                        </span>
+                    </td>
+                    <td>{{ game.field !== null ? game.field : (game.home && game.away ? 'Warten' : 'Pause') }}</td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+    <section v-if="fieldCount">
+        <h2>Feldübersicht</h2>
+        <div class="field-grid">
+            <div v-for="n in fieldCount" :key="n" :class="['field-cell', { 'cl-field': n <= clFieldCount }]">
+                Feld {{ n }}
+            </div>
+        </div>
+        <div class="legend">
+            <span class="legend-item"><span class="legend-color cl-field"></span> Championsliga-Feld</span>
+            <span class="legend-item"><span class="legend-color"></span> Bundesliga-Feld</span>
+        </div>
+    </section>
+    <!-- standings will appear after schedule -->
+    <section class="printable" v-if="Object.keys(results.CL).length || Object.keys(results.BL).length">
+        <h2>Tabellen</h2>
+        <p>Nach jeder Runde (ca. 7 Minuten Timer starten) trägt ihr die Punkte pro Team ein; die Gesamtsummen werden automatisch berechnet.</p>
+        <div v-if="standingsCL.length">
+            <h3>Championsliga</h3>
+            <table class="standings-table">
+                <tr>
+                    <th>Team</th>
+                    <th v-for="r in maxRoundCL" :key="r">R{{r}}</th>
+                    <th>Total</th>
+                </tr>
+                <tr v-for="row in standingsCL" :key="row.team">
+                    <td>{{ row.team }}</td>
+                    <td v-for="(pts,i) in row.rounds" :key="i">
+                        <input type="number" v-model.number="results.CL[row.team][i]">
+                    </td>
+                    <td>{{ row.total }}</td>
+                </tr>
+            </table>
+        </div>
+        <div v-if="standingsBL.length">
+            <h3>Bundesliga</h3>
+            <table class="standings-table">
+                <tr>
+                    <th>Team</th>
+                    <th v-for="r in maxRoundBL" :key="r">R{{r}}</th>
+                    <th>Total</th>
+                </tr>
+                <tr v-for="row in standingsBL" :key="row.team">
+                    <td>{{ row.team }}</td>
+                    <td v-for="(pts,i) in row.rounds" :key="i">
+                        <input type="number" v-model.number="results.BL[row.team][i]">
+                    </td>
+                    <td>{{ row.total }}</td>
+                </tr>
+            </table>
+        </div>
+        <div>
+            <h3>Gesamt</h3>
+            <table class="standings-table">
+                <tr>
+                    <th>Team</th>
+                    <th>Total</th>
+                </tr>
+                <tr v-for="row in standingsAll" :key="row.team">
+                    <td>{{ row.team }}</td>
+                    <td>{{ row.total }}</td>
+                </tr>
+            </table>
+        </div>
+    </section>
+</div>
+    <footer class="app-footer">
+        &copy; 2026 Sönke Brauch
+    </footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>
