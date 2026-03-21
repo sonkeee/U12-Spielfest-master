@@ -40,7 +40,7 @@
             <input type="number" v-model.number="fieldCount" min="1">
         </label>
         <label>
-            Championsliga-Felder:
+            Champions league-Felder:
             <input type="number" v-model.number="clFieldCount" :max="fieldCount" min="0">
         </label>
         <label>
@@ -57,7 +57,7 @@
         <div class="team-form">
             <input type="text" v-model="newTeam.name" placeholder="Teamname">
             <select v-model="newTeam.league">
-                <option value="CL">Championsliga</option>
+                <option value="CL">Champions league</option>
                 <option value="BL">Bundesliga</option>
             </select>
             <button @click="addTeam">Hinzufügen</button>
@@ -115,7 +115,7 @@
         </div>
         <!-- round-switcher -->
         <div class="round-nav" v-if="clFieldCount && maxRoundCL > 0">
-            <h3>Championsliga – Runde {{ roundLabelCL }}</h3>
+            <h3>Champions league – Runde {{ roundLabelCL }}</h3>
             <button @click="prevRound('CL')" :disabled="currentRoundCL<=1">←</button>
             <button @click="nextRound('CL')" :disabled="currentRoundCL>=maxRoundCL">→</button>
             <table class="round-table">
@@ -165,7 +165,7 @@
             </div>
         </div>
         <div v-if="schedule.CL.length">
-            <h3>Championsliga</h3>
+            <h3>Champions league</h3>
             <table class="schedule-table">
                 <tr>
                     <th>Runde</th>
@@ -249,7 +249,7 @@
         <h2>Tabellen</h2>
         <p>Nach jeder Runde (ca. 7 Minuten Timer starten) trägt ihr die Punkte pro Team ein; die Gesamtsummen werden automatisch berechnet.</p>
         <div v-if="standingsCL.length">
-            <h3>Championsliga</h3>
+            <h3>Champions league</h3>
             <table class="standings-table">
                 <tr>
                     <th>Team</th>
